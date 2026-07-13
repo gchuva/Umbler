@@ -1,7 +1,9 @@
 # Umbler Pergunta 1
 teste processo seletivo Umbler
-Quais comandos você usaria para diagnosticar o problema? (logs, status de serviços, portas em
+
+# Quais comandos você usaria para diagnosticar o problema? (logs, status de serviços, portas em
 uso, processos.)
+
 systemctl status nginx (Verifica status do serviço Nginx)
 systemctl status php-fpm ( Verifica status do serviço php-fpm)
 
@@ -30,7 +32,9 @@ PHP-FPM parado ou apresentando falha
 Passo de verificação
 
 systemctl status php-fpm
+
 # Se estiver inativo:
+
 systemctl start php-fpm
 systemctl enable php-fpm
 
@@ -42,6 +46,7 @@ systemctl enable php-fpm
 ls -larth /var/run/php/php*-fpm.sock
 
 # Verificar permissões (precisa ser pelo usuário do Nginx)
+
 # Verificar configuração do pool PHP-FPM
 cat /etc/php-fpm.d/www.conf | grep listen
 
