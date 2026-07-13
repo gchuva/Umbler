@@ -1,0 +1,167 @@
+#!/bin/bash
+
+# health_check.sh - Verifica saúde do Nginx e PHP-FPM
+# Seguro para execução via cron
+
+# Configurações
+LOG_FILE="/var/log/health_check.log"
+ALERT_EMAIL="admin@seudominio.com"  # Opcional
+NGINX_URL="http://localhost/health"  # URL para teste do Nginx
+PHP_URL="http://localhost/health.php"  # URL para teste do PHP-FPM
+TIMEOUT=5
+
+# Função de log
+log_message() {
+    local level="$1"
+    local message="$2"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" >> "$LOG_FILE"
+}
+
+# Função para enviar alerta (email)
+send_alert() {
+    local subject="$1"
+    local body="$2"
+    
+    # Opção 1: Usando mail (se configurado)
+    if command -v mail &> /dev/null; then
+        echo "$body" | mail -s "$subject" "$ALERT_EMAIL"
+    fi
+    
+    # Opção 2: Webhook (exemplo para Slack/Discord)
+    # curl -X POST -H 'Content-type: application/json' \
+    #     --data "{\"text\":\"$subject: $body\"}" \
+    #     "SEU_WEBHOOK_URL"
+    
+    log_message "ALERT" "$subject - $body"
+}
+
+# Verificar se o serviço está ativo (systemd)
+check_service_active() {
+    local service="$1"
+    if systemctl is-active --quiet "$service"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Verificar se a porta está ouvindo
+check_port_listening() {
+    local port="$1"
+    if netstat -tln 2>/dev/null | grep -q ":$port " || \
+       ss -tln 2>/dev/null | grep -q ":$port "; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Verificar socket do PHP-FPM
+check_php_fpm_socket() {
+    local socket="/var/run/php/php-fpm.sock"
+    
+    # Verifica sockets comuns
+    for sock in /var/run/php/*.sock /var/run/php-fpm.sock; do
+        if [ -S "$sock" ]; then
+            socket="$sock"
+            break
+        fi
+    done
+    
+    if [ -S "$socket" ]; then
+        # Verifica se o socket está responsivo
+        if timeout $TIMEOUT bash -c "echo '<?php echo \"OK\";' | \
+            cgi-fcgi -bind -connect $socket 2>&1" | grep -q "OK"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Verificar Nginx via HTTP
+check_nginx_http() {
+    local response
+    response=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time $TIMEOUT "$NGINX_URL" 2>/dev/null)
+    
+    if [[ "$response" =~ ^[23] ]]; then
+        return 0
+    else
+        # Tenta porta 80 diretamente
+        response=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time $TIMEOUT "http://localhost:80" 2>/dev/null)
+        if [[ "$response" =~ ^[23] ]]; then
+            return 0
+        fi
+        return 1
+    fi
+}
+
+# Verificar PHP-FPM via HTTP (processamento PHP)
+check_php_fpm_http() {
+    local response
+    response=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time $TIMEOUT "$PHP_URL" 2>/dev/null)
+    
+    if [[ "$response" =~ ^[23] ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ===== INÍCIO DAS VERIFICAÇÕES =====
+
+log_message "INFO" "=== Iniciando health check ==="
+
+issues=0
+nginx_status="OK"
+phpfpm_status="OK"
+
+# 1. Verificar Nginx
+if ! check_service_active "nginx"; then
+    nginx_status="CRITICO - Serviço parado"
+    ((issues++))
+    log_message "ERROR" "Nginx: $nginx_status"
+elif ! check_port_listening 80; then
+    nginx_status="CRITICO - Porta 80 não ouvindo"
+    ((issues++))
+    log_message "ERROR" "Nginx: $nginx_status"
+elif ! check_nginx_http; then
+    nginx_status="WARNING - HTTP não respondendo corretamente"
+    ((issues++))
+    log_message "WARNING" "Nginx: $nginx_status"
+else
+    log_message "INFO" "Nginx: OK - Respondendo normalmente"
+fi
+
+# 2. Verificar PHP-FPM
+if ! check_service_active "php-fpm" && \
+   ! check_service_active "php7.4-fpm" && \
+   ! check_service_active "php8.0-fpm" && \
+   ! check_service_active "php8.1-fpm"; then
+    phpfpm_status="CRITICO - Serviço parado"
+    ((issues++))
+    log_message "ERROR" "PHP-FPM: $phpfpm_status"
+elif ! check_port_listening 9000 && ! check_php_fpm_socket; then
+    phpfpm_status="CRITICO - Socket/porta não disponíveis"
+    ((issues++))
+    log_message "ERROR" "PHP-FPM: $phpfpm_status"
+elif ! check_php_fpm_http; then
+    phpfpm_status="WARNING - PHP não processando requisições"
+    ((issues++))
+    log_message "WARNING" "PHP-FPM: $phpfpm_status"
+else
+    log_message "INFO" "PHP-FPM: OK - Processando requisições"
+fi
+
+# Resumo
+if [ $issues -gt 0 ]; then
+    log_message "ALERT" "Health check falhou com $issues problema(s)"
+    send_alert "Health Check Alert" \
+        "Problemas detectados:\nNginx: $nginx_status\nPHP-FPM: $phpfpm_status"
+    exit 1
+else
+    log_message "INFO" "Health check OK - Todos os serviços operacionais"
+    exit 0
+fi
