@@ -15,13 +15,16 @@ tail -f /var/log/nginx/access.log
 tail -f /var/log/php-fpm/error.log
 
 # Verificar portas
-netstat -tlnp | grep 9000  # porta padrão do PHP-FPM
-netstat -tlnp | grep 80 
-netstat -tlnp | grep 443
+netstat -tulpn | grep 9000  # porta padrão do PHP-FPM
+
+netstat -tulpn | grep 80 
+
+netstat -tulpn | grep 443
 
 # Verificar processos
-ps aux | grep nginx
-ps aux | grep php-fpm
+ps aux | grep -i nginx
+
+ps aux | grep -i php-fpm
 
 3 causas prováveis:
 
@@ -36,6 +39,7 @@ systemctl status php-fpm
 # Se estiver inativo:
 
 systemctl start php-fpm
+
 systemctl enable php-fpm
 
 # Causa 2
