@@ -4,6 +4,7 @@ teste processo seletivo Umbler
 # Quais comandos você usaria para diagnosticar o problema? (logs, status de serviços, portas em uso, processos.)
 
 systemctl status nginx (Verifica status do serviço Nginx)
+
 systemctl status php-fpm ( Verifica status do serviço php-fpm)
 
 # Verificar logs do Nginx
